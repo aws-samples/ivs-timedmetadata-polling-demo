@@ -6,8 +6,9 @@ This repo is part one of a two-part series to excite and enable developers to bu
 
 Please visit the following locations for detailed information about this code:
 
-[Using Amazon Interactive Video Service Timed Metadata Part 1](https://aws.amazon.com/blogs/media/)
-[Using Amazon Interactive Video Service Timed Metadata Part 2](https://aws.amazon.com/blogs/media/)
+[Using Amazon Interactive Video Service Timed Metadata Part 1](https://aws.amazon.com/blogs/media/) Coming Soon!
+
+[Using Amazon Interactive Video Service Timed Metadata Part 2](https://aws.amazon.com/blogs/media/) Coming Soon!
 
 ## Overview
 
