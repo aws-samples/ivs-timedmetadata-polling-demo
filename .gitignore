@@ -1,0 +1,10 @@
+.DS_Store
+.vscode
+*.zip
+__*
+v-env
+env
+*.pem
+credentials*
+config.json
+*.pyc
