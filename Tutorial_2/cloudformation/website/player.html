@@ -1,0 +1,426 @@
+<!doctype html>
+<html lang="en">
+
+<head>
+    <meta charset="utf-8" />
+    <!-- JQUERY -->
+    <script src="https://code.jquery.com/jquery-3.4.1.min.js" crossorigin="anonymous">
+    </script>
+    <!-- BOOTSTRAP -->
+    <link rel="stylesheet" href="https://stackpath.bootstrapcdn.com/bootstrap/4.4.1/css/bootstrap.min.css"
+        integrity="sha384-Vkoo8x4CGsO3+Hhxv8T/Q5PaXtkKtu6ug5TOeNV6gBiFeWPGFN9MuhOf23Q9Ifjh" crossorigin="anonymous">
+    <script src="https://cdn.jsdelivr.net/npm/popper.js@1.16.0/dist/umd/popper.min.js"
+        integrity="sha384-Q6E9RHvbIyZFJoft+2mJbHaEWldlvI9IOYy5n3zV9zzTtmI3UksdQRVvoxMfooAo" crossorigin="anonymous">
+    </script>
+    <script src="https://stackpath.bootstrapcdn.com/bootstrap/4.4.1/js/bootstrap.min.js"
+        integrity="sha384-wfSDF2E50Y2D1uUdj0O3uMBJnjuUD4Ih7YwaYd1iqfktj0Uod8GCExl3Og8ifwB6" crossorigin="anonymous">
+    </script>
+    <style>
+        html,
+        body {
+            width: 100%;
+            height: 100%;
+            margin: 0;
+            padding: 0;
+            background: #CCCCCC; 
+            font-family: system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Ubuntu, "Helvetica Neue", sans-serif;
+        }
+
+        .video-wrapper {
+            width: 100%;
+            position: relative;
+            display: flex;
+            flex-direction: column;
+            border-radius: 6px;
+            box-shadow: 0 10px 60px rgba(0, 0, 0, .15);
+        }
+
+        video {
+            width: 100%;
+            height: 100%;
+            position: absolute;
+            top: 0;
+            left: 0;
+        }
+
+        pre {
+            background: #000;
+            color: #FFF;
+            outline: 1px solid #ccc;
+            padding: 5px;
+            margin: 5px;
+            white-space: pre-wrap;
+        }
+
+        .string {
+            color: green;
+        }
+
+        .number {
+            color: darkorange;
+        }
+
+        .boolean {
+            color: blue;
+        }
+
+        .null {
+            color: magenta;
+        }
+
+        .key {
+            color: red;
+        }
+
+        .table td, .table th {
+            padding: 3px 3px 6px 3px;
+            font-size: 80%;
+        }
+    </style>
+    <!-- video.js Player Code-->
+    <link href="https://cdnjs.cloudflare.com/ajax/libs/video.js/7.6.6/video-js.css" rel="stylesheet">
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/video.js/7.6.6/video.min.js"></script>
+    <!-- AMAZON IVS Player Code-->
+    <script src="https://player.live-video.net/1.0.0/amazon-ivs-videojs-tech.min.js"></script>
+    <script src="https://player.live-video.net/1.0.0/amazon-ivs-quality-plugin.min.js"></script>
+    <script>
+        // Initialize player
+        // https://codepen.io/amazon-ivs/pen/bdc01e977102051eae5fb85482f88276
+        $.getJSON("sample.json", function(config_json) {
+            // asign a unique id for requestor_id
+            get_unique_id();
+
+            // Set up IVS playback tech and quality plugin
+            registerIVSTech(videojs);
+            registerIVSQualityPlugin(videojs);
+
+            // Initialize video.js player
+            const videoJSPlayer = videojs("amazon-ivs-videojs", {
+                techOrder: ["AmazonIVS"],
+                controlBar: {
+                    playToggle: {
+                        replay: false
+                    }, // Hides the replay button for VOD
+                    pictureInPictureToggle: false // Hides the PiP button
+                }
+            });
+
+            // Use the player API once the player instance's ready callback is fired
+            const readyCallback = function () {
+                // This executes after video.js is initialized and ready
+                window.videoJSPlayer = videoJSPlayer;
+
+                // Get reference to Amazon IVS player
+                const ivsPlayer = videoJSPlayer.getIVSPlayer();
+
+                // Show the "big play" button when the stream is paused
+                const videoContainerEl = document.querySelector("#amazon-ivs-videojs");
+                videoContainerEl.addEventListener("click", () => {
+                    if (videoJSPlayer.paused()) {
+                        videoContainerEl.classList.remove("vjs-has-started");
+                    } else {
+                        videoContainerEl.classList.add("vjs-has-started");
+                    }
+                });
+
+                // Logs low latency setting and latency value 5s after playback starts
+                const PlayerState = videoJSPlayer.getIVSEvents().PlayerState;
+                ivsPlayer.addEventListener(PlayerState.PLAYING, () => {
+                    console.log("Player State - PLAYING");
+                    setTimeout(() => {
+                        console.log(
+                            `This stream is ${
+                                ivsPlayer.isLiveLowLatency() ? "" : "not "
+                            }playing in ultra low latency mode`
+                        );
+                        console.log(`Stream Latency: ${ivsPlayer.getLiveLatency()}s`);
+                    }, 5000);
+                });
+
+                // Log errors
+                const PlayerEventType = videoJSPlayer.getIVSEvents().PlayerEventType;
+                ivsPlayer.addEventListener(PlayerEventType.ERROR, (type, source) => {
+                    console.warn("Player Event - ERROR: ", type, source);
+                });
+
+                // Log and display timed metadata
+                ivsPlayer.addEventListener(PlayerEventType.TEXT_METADATA_CUE, (cue) => {
+                    const metadataText = cue.text;
+                    const position = ivsPlayer.getPosition().toFixed(2);
+                    console.log(
+                        `Player Event - TEXT_METADATA_CUE: "${metadataText}". Observed ${position}s after playback started.`
+                    );
+                    // Do something with the Metadata
+                    timed_metadata_action(position, metadataText);
+                });
+
+                // Enables manual quality selection plugin
+                videoJSPlayer.enableIVSQualityPlugin();
+
+                // Set volume and play default stream
+                videoJSPlayer.volume(0.5);
+                // Use HLS URL from json file
+                videoJSPlayer.src(config_json['playback_url']);
+            };
+
+            // Register ready callback
+            videoJSPlayer.ready(readyCallback);
+
+
+            
+        });
+
+        // TIMED METADATA CODE
+        function timed_metadata_action(metadata_time, metadata_text) {
+            var metadata = jQuery.parseJSON(metadata_text);
+            question = metadata.question;
+            current_time = metadata.current_time;
+            answers_html = '';
+            answers = metadata.answers;
+            for (const answer in answers) {
+                answers_html +=
+                    `<button type="button" class="btn btn-primary" style="margin-right: 10px" onclick="button_click('${answers[answer]}','${metadata.poll_id}')";>${answers[answer]}</button>`;
+            }
+            $("#question-answers").html(answers_html);
+            $("#question-question").html(question);
+            var str = JSON.stringify(metadata, undefined, 4);
+            var metadata_html =
+                `payload from PlayerEventType.TEXT_METADATA_CUE at ivsPlayer.getPosition() ${metadata_time}s: \r\n${syntaxHighlight(str)}`;
+            $("#metadata").html(metadata_html);
+            // get answers
+            get_poll(metadata.poll_id);
+            get_answers();
+        }
+
+        // AdjNounNum Generator to give fun unique IDs
+        function get_unique_id(){
+            var r_adj;
+            var r_noun;
+            var r_number;
+            $.getJSON("words.json", function(json) {
+                noun_list = json['nouns']
+                r_noun = noun_list[Math.floor(Math.random()*noun_list.length)];
+                adj_list = json['adjs']
+                r_adj = adj_list[Math.floor(Math.random()*adj_list.length)];
+                r_number = Math.floor(Math.random() * 100)
+                // give a requestor_id
+                $('#requestor_id').html(r_adj + '-' + r_noun + '-' + String(r_number));
+            });
+
+        }
+        // https://stackoverflow.com/questions/4810841/pretty-print-json-using-javascript?rq=1
+        function syntaxHighlight(json) {
+            json = json.replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;');
+            return json.replace(
+                /("(\\u[a-zA-Z0-9]{4}|\\[^u]|[^\\"])*"(\s*:)?|\b(true|false|null)\b|-?\d+(?:\.\d*)?(?:[eE][+\-]?\d+)?)/g,
+                function (match) {
+                    var cls = 'number';
+                    if (/^"/.test(match)) {
+                        if (/:$/.test(match)) {
+                            cls = 'key';
+                        } else {
+                            cls = 'string';
+                        }
+                    } else if (/true|false/.test(match)) {
+                        cls = 'boolean';
+                    } else if (/null/.test(match)) {
+                        cls = 'null';
+                    }
+                    return '<span class="' + cls + '">' + match + '</span>';
+                });
+        }
+        // GET Answers for this current "Requestor" from API Gateway
+        function get_answers(){
+            $.getJSON("sample.json", function(config_json) {
+            requestor_id = $('#requestor_id').text();
+            this_data = {
+                    "requestor_id": requestor_id,
+                };
+                console.log("sending to api gateway: " + JSON.stringify(this_data));
+            $.ajax({
+                type: 'POST',
+                url: config_json['api_gateway'] + '/requestor-get',
+                headers: { 
+                    "Access-Control-Allow-Origin": "*",
+                    "Content-Type":"application/json"
+                },
+                crossDomain: true,
+                data: JSON.stringify(this_data),
+                success: function (data) {
+                    console.log('success response from api gateway: ' + JSON.stringify(data));
+                    dict = data.items;
+                    for(var key in dict) {
+                        if ($('#answer-' + key).length === 0) {
+                            $("#submitted_answers").append(`<tr id="answer-${key}"><td><a href="javascript:get_poll('${key}');">${key}</a></td><td>${dict[key]}</td></tr>`);
+                        }
+                    }
+                },
+                error: function (textStatus, errorThrown) {
+                    console.log('error response from api gateway: ' + JSON.stringify(textStatus));
+                    $("#submitted_answers").append('<div class="alert alert-danger" role="alert">Error: ' + JSON.stringify(textStatus) + "</div>");
+                },
+                contentType: "application/json",
+                dataType: 'json'
+            });        
+        });
+        }
+        // GET Answers for specific "Poll" Question
+        function get_poll(poll_id){
+            $.getJSON("sample.json", function(config_json) {
+            this_data = {
+                    "poll_id": poll_id,
+                };
+                console.log("sending to api gateway: " + JSON.stringify(this_data));
+            $.ajax({
+                type: 'POST',
+                url: config_json['api_gateway'] + '/poll-get',
+                headers: { 
+                    "Access-Control-Allow-Origin": "*",
+                    "Content-Type":"application/json"
+                },
+                crossDomain: true,
+                data: JSON.stringify(this_data),
+                success: function (data) {
+                    console.log('success response from api gateway: ' + JSON.stringify(data));
+                    items = data.items;
+                    $("#poll_answers").html('');
+                    $("#poll_answers_id").html(poll_id);
+                    for(var key in items) {
+                        $("#poll_answers").append(`<tr id="poll-${key}"><td>${key}</td><td>${items[key]}</td></tr>`);
+                    }
+                    responses = data.responses;
+                    responses_html = `<div class="progress">`;
+                    responses_colors = [ 'bg-success', 'bg-danger', 'bg-warning', 'bg-info', 'bg-light', 'bg-secondary', 'bg-primary' ]
+                    responses_total = 0;
+                    for(var key in responses) {
+                        responses_total = responses_total + responses[key];
+                    }
+                    for(var key in responses) {
+                        var this_color = responses_colors.shift();
+                        var this_ratio = (responses[key] / responses_total) * 100;
+                        responses_html += `<div class="progress-bar ${this_color}" role="progressbar" style="width: ${this_ratio}%;" aria-valuenow="${this_ratio}" aria-valuemin="0" aria-valuemax="100">${key}</div>`
+                    }
+                    responses_html += `<div class="progress">`;
+                    $("#poll_responses").html(responses_html);
+                },
+                error: function (textStatus, errorThrown) {
+                    console.log('error response from api gateway: ' + JSON.stringify(textStatus));
+                    $("#poll_answers").append('<div class="alert alert-danger" role="alert">Error: ' + JSON.stringify(textStatus) + "</div>");
+                },
+                contentType: "application/json",
+                dataType: 'json'
+            });        
+        });
+        }
+        // PUT Answer for specific "Poll" Question
+        function button_click(response, poll_id) {
+            $.getJSON("sample.json", function(config_json) {
+            $("#question-answers").html('<div class="alert alert-primary" role="alert">Sending answer: ' + response + "</div>");
+            requestor_id = $('#requestor_id').text();
+            this_data = {
+                    "requestor_id": requestor_id,
+                    "poll_id": poll_id,
+                    "type": 'answer',
+                    "response": response
+                };
+                console.log("sending to api gateway: " + JSON.stringify(this_data));
+            $.ajax({
+                type: 'POST',
+                url: config_json['api_gateway'] + '/requestor-put',
+                headers: { 
+                    "Access-Control-Allow-Origin": "*",
+                    "Content-Type":"application/json"
+                },
+                crossDomain: true,
+                data: JSON.stringify(this_data), 
+                success: function (data) {
+                    console.log('success response from api gateway: ' + JSON.stringify(data));
+                    $("#question-answers").html('<div class="alert alert-success" role="alert">Response: ' + data.state + "</div>");
+                },
+                error: function (textStatus, errorThrown) {
+                    console.log('error response from api gateway: ' + JSON.stringify(textStatus));
+                    $("#question-answers").html('<div class="alert alert-danger" role="alert">Error: ' + JSON.stringify(textStatus) + "</div>");
+                },
+                contentType: "application/json",
+                dataType: 'json'
+            });
+            // wait 0.25 seconds to make sure answer was in database before retrieving "Poll" answers
+            setTimeout(() => {  get_answers(); get_poll(poll_id);}, 250);
+        });
+        }
+
+    </script>
+</head>
+
+<body>
+
+    <div class="container-fluid">
+        <div class="row">
+            <div class="col-6">
+                <h3>Quiz Time!</h3>
+                <div id="question"></div>
+                <div class="card text-white bg-dark mb-3">
+                    <div class="card-header">
+                        Poll Question
+                    </div>
+                    <div class="card-body">
+                        <p class="card-text" id="question-question"></p>
+                        <div id="question-answers"></div>
+                    </div>
+                </div>
+                <div class="card text-white bg-dark mb-3">
+                    <div class="card-header">
+                        Poll Answers
+                    </div>
+                    <div class="card-body">
+                        <p class="card-text">
+                            poll_id: <span id="poll_answers_id"></span>
+                            <div id="poll_responses" style="padding-bottom: 5px;"></div>
+                            <table class="table table-striped table-dark">
+                                <thead><tr><th>requestor_id</th><th>answer</th></tr></thead>
+                                <tbody id="poll_answers" ></tbody>
+                                
+                            </table>
+                            <div ></div>
+                        </p>
+                    </div>
+                </div>
+                <div class="card text-white bg-dark mb-3">
+                    <div class="card-header">
+                        Requestor's Answers
+                    </div>
+                    <div class="card-body">
+                        <p class="card-text">
+                            requestor_id: <span id="requestor_id">not-set</span>
+                            <table class="table table-striped table-dark">
+                                <thead><tr><th>poll_id</th><th>answer</th></tr></thead>
+                                <tbody id="submitted_answers" ></tbody>
+                                
+                            </table>
+
+                        </p>
+                    </div>
+                </div>
+
+            </div>
+            <div class="col-6">
+                <h3>Live Video</h3>
+                <div class="video-wrapper">
+                    <video id="amazon-ivs-videojs" class="video-js vjs-fluid vjs-big-play-centered" controls muted autoplay
+                        playsinline></video>
+                </div>
+                <pre id="metadata"></pre>
+
+
+            </div>
+        </div>
+        <div class="row">
+            <div class="col-12">
+                
+            </div>
+        </div>
+    </div>
+
+</body>
+
+</html>

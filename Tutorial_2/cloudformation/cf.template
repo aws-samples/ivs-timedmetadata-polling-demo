@@ -1,0 +1,381 @@
+AWSTemplateFormatVersion: "2010-09-09"
+
+
+Mappings:
+  SourceCode:
+    General:
+      S3BucketName: %%BUCKET_NAME%%
+      KeyPrefix: %%PROJECT_NAME%%/%%PROJECT_VERSION%%
+    KeyWebapi:
+      KeySuffix: webapi_resources.zip
+    KeyWebsite:
+      KeySuffix: website_resources.zip
+    KeyWebsitecopy:
+      KeySuffix: websitecopy_resources.zip
+
+Parameters:
+
+  PlaybackUrl:
+    Description: Specify the starfruit playback url
+    Type: String
+    Default: "CHANGEME!!"
+
+
+Resources:
+# IAM --------------------
+  WebsitecopyLambdaRole:
+    Type: AWS::IAM::Role
+    Properties:
+      AssumeRolePolicyDocument:
+        Version: 2012-10-17
+        Statement:
+          -
+            Effect: Allow
+            Principal:
+              Service:
+                - lambda.amazonaws.com
+            Action:
+              - "sts:AssumeRole"
+      Path: "/"
+      Policies:
+        -
+          PolicyName: !Sub "${AWS::StackName}-CustomResource"
+          PolicyDocument:
+            Statement:
+              -
+                Effect: Allow
+                Action:
+                  - logs:CreateLogGroup
+                  - logs:CreateLogStream
+                  - logs:PutLogEvents
+                Resource:
+                  - !Sub "arn:aws:logs:${AWS::Region}:${AWS::AccountId}:log-group:/aws/lambda/*"
+              -
+                Effect: Allow
+                Action:
+                  - s3:GetObject
+                  - s3:PutObject
+                  - s3:DeleteObject
+                Resource:
+                  - !Sub "arn:aws:s3:::${WebsiteBucket}/*"
+              -
+                Effect: Allow
+                Action:
+                  - s3:ListBucket
+                Resource:
+                  - !Sub "arn:aws:s3:::${WebsiteBucket}"
+
+  WebapiLambdaRole:
+    Type: AWS::IAM::Role
+    Properties:
+      AssumeRolePolicyDocument:
+        Version: 2012-10-17
+        Statement:
+          -
+            Effect: Allow
+            Principal:
+              Service:
+                - lambda.amazonaws.com
+            Action:
+              - "sts:AssumeRole"
+      Path: "/"
+      Policies:
+        -
+          PolicyName: !Sub "${AWS::StackName}-Poll"
+          PolicyDocument:
+            Statement:
+              -
+                Effect: Allow
+                Action:
+                  - logs:CreateLogGroup
+                  - logs:CreateLogStream
+                  - logs:PutLogEvents
+                Resource:
+                  - !Sub "arn:aws:logs:${AWS::Region}:${AWS::AccountId}:log-group:/aws/lambda/*"
+              -
+                Effect: Allow
+                Action:
+                  - dynamodb:PutItem
+                  - dynamodb:DeleteItem
+                  - dynamodb:GetItem
+                  - dynamodb:Scan
+                  - dynamodb:Query
+                  - dynamodb:UpdateItem
+                Resource:
+                  - !GetAtt PollDynamoTable.Arn
+              -
+                Effect: Allow
+                Action:
+                  - dynamodb:BatchGetItem
+                  - dynamodb:GetItem
+                  - dynamodb:Scan
+                  - dynamodb:Query
+                  - dynamodb:GetRecords
+                Resource:
+                  - !Sub "${PollDynamoTable.Arn}/index/*"
+
+
+
+# LAMBDA --------------------
+  WebsitecopyLambdaFunction:
+    Type: AWS::Lambda::Function
+    Properties:
+      FunctionName: !Sub ${AWS::StackName}-WebsitecopyLambdaFunction
+      Description: Lambda Function
+      Handler: lambda_function.handler
+      Role: !GetAtt WebsitecopyLambdaRole.Arn
+      Code:
+        S3Bucket: !FindInMap ["SourceCode", "General", "S3BucketName"]
+        S3Key:
+          !Sub
+          - "${prefix}/${suffix}"
+          - prefix: !FindInMap ["SourceCode", "General", "KeyPrefix"]
+            suffix: !FindInMap ["SourceCode", "KeyWebsitecopy", "KeySuffix"]
+      Runtime: python3.7
+      Timeout: 60
+      MemorySize: 1024
+
+  WebsitecopyCustomResource:
+    DependsOn:
+    - apiGateway
+    Type: "Custom::WebsitecopyCustomResource"
+    Properties:
+      ServiceToken:
+        Fn::GetAtt:
+        - WebsitecopyLambdaFunction
+        - Arn
+      BucketName:
+        Ref: WebsiteBucket
+      PlaybackUrl:
+        Ref: PlaybackUrl
+      ApiGateway: !Sub "https://${apiGateway}.execute-api.${AWS::Region}.amazonaws.com/PROD"
+      WebsiteS3Bucket: !FindInMap ["SourceCode", "General", "S3BucketName"]
+      WebsiteS3Key:
+        !Sub
+        - "${prefix}/${suffix}"
+        - prefix: !FindInMap ["SourceCode", "General", "KeyPrefix"]
+          suffix: !FindInMap ["SourceCode", "KeyWebsite", "KeySuffix"]
+
+  WebapiLambda:
+    Type: AWS::Lambda::Function
+    Properties:
+      FunctionName: !Sub ${AWS::StackName}-WebapiLambda
+      Description: Poll Lambda
+      Handler: lambda_function.lambda_handler
+      Role: !GetAtt WebapiLambdaRole.Arn
+      Code:
+        S3Bucket: !FindInMap ["SourceCode","General", "S3BucketName"]
+        S3Key:
+          !Sub
+          - "${prefix}/${suffix}"
+          - prefix: !FindInMap ["SourceCode","General", "KeyPrefix"]
+            suffix: !FindInMap ["SourceCode", "KeyWebapi", "KeySuffix"]
+      Runtime: python3.7
+      Timeout: 60
+      MemorySize: 1024
+      Environment:
+        Variables:
+          DYNAMO_TABLE_NAME: !Ref PollDynamoTable
+
+# DYNAMODB --------------------
+
+  PollDynamoTable: 
+    Type: AWS::DynamoDB::Table
+    Properties: 
+      AttributeDefinitions: 
+        - 
+          AttributeName: "poll_id"
+          AttributeType: "S"
+        - 
+          AttributeName: "requestor_id"
+          AttributeType: "S"
+        - 
+          AttributeName: "timestamp_created"
+          AttributeType: "N"
+      KeySchema: 
+        - 
+          AttributeName: "poll_id"
+          KeyType: "HASH"
+        - 
+          AttributeName: "requestor_id"
+          KeyType: "RANGE"
+      BillingMode: PAY_PER_REQUEST
+      GlobalSecondaryIndexes: 
+        - 
+          IndexName: "requestor_id-timestamp_created-index"
+          KeySchema: 
+            - 
+              AttributeName: "requestor_id"
+              KeyType: "HASH"
+            - 
+              AttributeName: "timestamp_created"
+              KeyType: "RANGE"
+          Projection: 
+            ProjectionType: "ALL"
+
+# A PIG --------------------
+
+  apiGateway:
+    Type: "AWS::ApiGateway::RestApi"
+    Properties:
+      Name: "poll-api-from-cloudformation"
+      Description: "Poll Gateway"
+      EndpointConfiguration:
+        Types:
+          - REGIONAL
+
+  ProxyResource:
+    Type: "AWS::ApiGateway::Resource"
+    Properties:
+      ParentId: !GetAtt apiGateway.RootResourceId
+      RestApiId: !Ref apiGateway
+      PathPart: '{proxy+}'
+
+  apiGatewayRootMethod:
+    Type: AWS::ApiGateway::Method
+    Properties:
+      AuthorizationType: NONE
+      HttpMethod: ANY
+      Integration:
+        IntegrationHttpMethod: POST
+        Type: AWS_PROXY
+        PassthroughBehavior: WHEN_NO_MATCH
+        Uri: !Sub "arn:aws:apigateway:${AWS::Region}:lambda:path/2015-03-31/functions/${WebapiLambda.Arn}/invocations"
+      ResourceId: !Ref ProxyResource
+      RestApiId: !Ref "apiGateway"
+
+  OptionsMethod:
+    Type: AWS::ApiGateway::Method
+    Properties:
+      AuthorizationType: NONE
+      ResourceId: !Ref ProxyResource
+      RestApiId: !Ref "apiGateway"
+      HttpMethod: OPTIONS
+      Integration:
+        IntegrationResponses:
+        - StatusCode: '200'
+          ResponseParameters:
+            method.response.header.Access-Control-Allow-Headers: "'Content-Type,Authorization,X-Amz-Date,X-Api-Key,X-Amz-Security-Token,access-control-allow-origin'"
+            method.response.header.Access-Control-Allow-Methods: "'DELETE,GET,HEAD,OPTIONS,PATCH,POST,PUT'"
+            method.response.header.Access-Control-Allow-Origin: "'*'"
+          ResponseTemplates:
+            application/json: ''
+        PassthroughBehavior: WHEN_NO_MATCH
+        RequestTemplates:
+          application/json: '{"statusCode": 200}'
+        Type: MOCK
+      MethodResponses:
+      - StatusCode: '200'
+        ResponseModels:
+          application/json: 'Empty'
+        ResponseParameters:
+            method.response.header.Access-Control-Allow-Headers: false
+            method.response.header.Access-Control-Allow-Methods: false
+            method.response.header.Access-Control-Allow-Origin: false
+
+  apiGatewayDeployment:
+    Type: "AWS::ApiGateway::Deployment"
+    DependsOn:
+      - "apiGatewayRootMethod"
+      - "OptionsMethod"
+    Properties:
+      RestApiId: !Ref "apiGateway"
+      StageName: PROD
+  
+  lambdaApiGatewayInvoke:
+    Type: "AWS::Lambda::Permission"
+    Properties:
+      Action: "lambda:InvokeFunction"
+      FunctionName: !GetAtt "WebapiLambda.Arn"
+      Principal: "apigateway.amazonaws.com"
+      SourceArn: !Sub "arn:aws:execute-api:${AWS::Region}:${AWS::AccountId}:${apiGateway}/*/*/*"
+
+
+# S3 --------------------
+  WebsiteBucket:
+    Type: AWS::S3::Bucket
+    Properties:
+      CorsConfiguration:
+        CorsRules:
+        - AllowedHeaders:
+          - "*"
+          AllowedMethods:
+          - GET
+          AllowedOrigins:
+          - "*"
+          MaxAge: 3000
+
+  WebsiteBucketPolicy:
+    Type: AWS::S3::BucketPolicy
+    Properties:
+      Bucket:
+        Ref: WebsiteBucket
+      PolicyDocument:
+        Version: '2012-10-17'
+        Id: PolicyForCloudFrontPrivateContent
+        Statement:
+        - Effect: Allow
+          Principal:
+            CanonicalUser:
+              !GetAtt WebsiteBucketOriginAccessIdentity.S3CanonicalUserId
+          Action: s3:GetObject
+          Resource:
+            !Sub "arn:aws:s3:::${WebsiteBucket}/*"
+
+
+# CloudFront --------------------
+
+  WebsiteBucketOriginAccessIdentity:
+    Type: AWS::CloudFront::CloudFrontOriginAccessIdentity
+    Properties:
+      CloudFrontOriginAccessIdentityConfig:
+        Comment:
+          !Sub "Origin Access Identity for ${WebsiteBucket}"
+
+  WebsiteBucketCloudFrontDistribution:
+    Type: AWS::CloudFront::Distribution
+    Properties:
+      DistributionConfig:
+        Comment:
+          !Sub "CDN for ${WebsiteBucket}"
+        DefaultCacheBehavior:
+          TargetOriginId:
+            Ref: WebsiteBucket
+          ViewerProtocolPolicy: https-only
+          DefaultTTL: 31536000
+          MinTTL: 31536000
+          MaxTTL: 31536000
+          AllowedMethods:
+          - HEAD
+          - GET
+          CachedMethods:
+          - HEAD
+          - GET
+          ForwardedValues:
+            QueryString: true
+        DefaultRootObject: index.html
+        Enabled: true
+        Origins:
+        - DomainName:
+            !Sub "${WebsiteBucket}.s3.amazonaws.com"
+          Id:
+            Ref: WebsiteBucket
+          S3OriginConfig:
+            OriginAccessIdentity:
+              !Sub "origin-access-identity/cloudfront/${WebsiteBucketOriginAccessIdentity}"
+        PriceClass: PriceClass_All
+        Restrictions:
+          GeoRestriction:
+            RestrictionType: none
+            Locations: []
+        ViewerCertificate:
+          CloudFrontDefaultCertificate: true
+          MinimumProtocolVersion: TLSv1
+
+Outputs:
+  BucketName:
+    Value: !GetAtt WebsitecopyCustomResource.BucketName
+  Website:
+    Value: !Sub https://${WebsiteBucketCloudFrontDistribution.DomainName}/player.html
+  apiGatewayURL:
+    Value: !Sub "https://${apiGateway}.execute-api.${AWS::Region}.amazonaws.com/PROD"
